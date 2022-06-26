@@ -10,6 +10,7 @@ import org.zeromq.ZMQ.Socket;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -18,7 +19,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static java.nio.file.StandardOpenOption.*;
 
 public class Sink {
     static class SinkArgs {
@@ -31,10 +34,6 @@ public class Sink {
         @Parameter(names = {"-p", "--port"})
         public int port = 5555;
 
-        @Parameter(names = {"--capacity"})
-        public int capacity = Integer.MAX_VALUE / 128;
-//        public int capacity = 1024;
-
         @Parameter(names = {"--cache"})
         public Path cache = Paths.get("C:\\Users\\Shiroki\\Code\\MRSort\\sorted\\");
 
@@ -46,13 +45,13 @@ public class Sink {
 
     private static class Combo {
         public final byte category;
-        public ArrayList<CompressedString> sink;
+        public final byte second;
         public final ConcurrentSkipListSet<PersistedFile> queue;
         public final AtomicLong counter;
 
-        public Combo(byte category, int cap) {
+        public Combo(byte category, byte second) {
             this.category = category;
-            this.sink = new ArrayList<>(cap);
+            this.second = second;
             this.queue = new ConcurrentSkipListSet<>(Comparator.comparingInt(PersistedFile::getLevel));
             this.counter = new AtomicLong();
         }
@@ -73,10 +72,12 @@ public class Sink {
             LOG.warn("Running a full sink. This should not happen in production environment.");
 
         try (ZContext context = new ZContext()) {
-            Combo[] sinks = new Combo[parameter.end - parameter.start + 1];
+            Combo[][] sinks = new Combo[parameter.end - parameter.start + 1][26];
             for (char i = parameter.start; i <= parameter.end; i++) {
-                LOG.debug("Creating sink for topic {}", i);
-                sinks[i - parameter.start] = new Combo((byte) i, parameter.capacity);
+                for (char j = 'a'; j <= 'z'; j++) {
+                    LOG.debug("Creating sink for cat {} sec {}", i, j);
+                    sinks[i - parameter.start][j - 'a'] = new Combo((byte) i, (byte) j);
+                }
             }
 
             Socket socket = context.createSocket(SocketType.PULL);
@@ -88,26 +89,24 @@ public class Sink {
                     0L, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>());
 
-            ByteBuffer buffer = ByteBuffer.allocate(15);
+            ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUFSIZE);
 
             while (!Thread.currentThread().isInterrupted()) {
-                if (socket.recvByteBuffer(buffer, 0) < 1) {
+                int size = socket.recvByteBuffer(buffer, 0);
+                if (size < 1) {
                     LOG.info("Received empty string!");
                     break;
                 }
                 buffer.flip();
-                CompressedString compressed = CompressedString.fromStringBuffer(buffer);
-                buffer.clear();
+                byte cat = buffer.get(0);
+                byte sec = buffer.get(1);
 
-                int catIndex = compressed.getCategoryIndex();
-                Combo combo = sinks[catIndex];
-                combo.sink.add(compressed);
-                if (combo.sink.size() == parameter.capacity) {
-                    ArrayList<CompressedString> oldSink = combo.sink;
-                    combo.sink = new ArrayList<>(parameter.capacity);
-                    CompletableFuture.supplyAsync(PersistedFile.persist(combo.counter, oldSink, parameter.cache), executor)
-                            .thenAcceptAsync(fileCreated(compressed.getCategory(), combo.queue, combo.counter, executor, parameter.cache));
-                }
+                Combo combo = sinks[cat - parameter.start][sec - 'a'];
+                PersistedFile persisted = PersistedFile.fromInput(buffer, combo.counter, parameter.cache);
+                executor.execute(() ->
+                        fileCreated(cat, sec, combo.queue, combo.counter, executor, parameter.cache)
+                                .accept(persisted));
+                buffer.clear();
             }
 
             socket.close();
@@ -123,37 +122,39 @@ public class Sink {
                 LOG.info("Waiting for final termination...");
             }
 
-            ExecutorService tmpExecutor = Executors.newSingleThreadExecutor();
-            LOG.info("Cleaning unwritten strings...");
-            Arrays.stream(sinks).filter(c -> !c.sink.isEmpty())
-                    .map(c -> CompletableFuture.supplyAsync(PersistedFile.persist(c.counter, c.sink, parameter.cache), tmpExecutor)
-                            .thenAcceptAsync(fileCreated(c.category, c.queue, c.counter, tmpExecutor, parameter.cache)))
-                    .collect(Collectors.toSet()).forEach(CompletableFuture::join);
-            tmpExecutor.shutdown();
-
             LOG.warn("Force merging files...");
             if (!Files.isDirectory(parameter.result)) {
                 LOG.info("Result directory not existing, creating.");
                 Files.createDirectory(parameter.result);
             }
-            Arrays.stream(sinks).forEach(c -> c.queue.stream().reduce((a, b) -> PersistedFile.merge(c.category, a, b, c.counter, parameter.cache))
-                    .ifPresent(last -> {
-                        LOG.info("String started with {} merged into {}, now decompressing.", (char) c.category, last.getPath().getFileName());
-                        Path target = parameter.result.resolve("result" + (char) c.category + ".txt");
+            for (Combo[] catArray : sinks) {
+                byte cat = catArray[0].category;
+                byte sec = catArray[0].second;
+                Stream<PersistedFile> result = Arrays.stream(catArray).map(c -> c.queue.parallelStream()
+                        .reduce((a, b) -> PersistedFile.sortMerge
+                                (c.category, c.second, a, b, c.counter, parameter.cache))).filter(Optional::isPresent).map(Optional::get);
+                LOG.info("String started with {} merged, now decompressing.", (char) cat);
+                Path target = parameter.result.resolve("result" + (char) cat + ".txt");
+                try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
+                    result.forEach(f -> {
                         try {
-                            last.decompress(target);
-                            LOG.info("Decompressed to {}.", target.getFileName());
+                            f.decompress(outc, cat, sec);
                         } catch (IOException e) {
-                            LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
+                            LOG.error("Failed to decompress {}: {}", f.getPath().getFileName(), e);
                         }
-                    }));
+                    });
+                    LOG.info("Decompressed to {}.", target.getFileName());
+                } catch (IOException e) {
+                    LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
+                }
+            }
             LOG.info("Merge finished.");
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private static Consumer<PersistedFile> fileCreated(byte cat, Set<PersistedFile> q, AtomicLong counter, Executor ex, Path cacheDir) {
+    private static Consumer<PersistedFile> fileCreated(byte cat, byte sec, Set<PersistedFile> q, AtomicLong counter, Executor ex, Path cacheDir) {
         return file -> {
             Optional<PersistedFile> best = q.stream().filter(b -> b.getLevel() == file.getLevel()).findFirst();
             if (!best.isPresent())
@@ -163,8 +164,8 @@ public class Sink {
             } else {
                 PersistedFile b = best.get();
                 q.remove(b);
-                CompletableFuture.supplyAsync(() -> PersistedFile.merge(cat, file, b, counter, cacheDir), ex)
-                        .thenAcceptAsync(fileCreated(cat, q, counter, ex, cacheDir));
+                CompletableFuture.supplyAsync(() -> PersistedFile.sortMerge(cat, sec, file, b, counter, cacheDir), ex)
+                        .thenAcceptAsync(fileCreated(cat, sec, q, counter, ex, cacheDir));
             }
         };
     }

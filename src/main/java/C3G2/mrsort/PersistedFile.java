@@ -7,13 +7,12 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ByteChannel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -27,24 +26,6 @@ public class PersistedFile {
         this.level = level;
     }
 
-    static Supplier<PersistedFile> persist(AtomicLong counter, List<CompressedString> list, Path targetDir) {
-        return () -> {
-            list.sort(null);
-            long count = counter.getAndIncrement();
-            byte category = list.get(0).getCategory();
-            Path target = targetDir.resolve(String.format("%c_0_%d.txt", category, count));
-            try (SeekableByteChannel c = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
-                ByteBuffer cache = ByteBuffer.allocate(10);
-                for (CompressedString s : list) s.writeCompressedTo(c, cache);
-            } catch (IOException e) {
-                LOG.error("Failed to persist {}: {}", target.getFileName(), e);
-                throw new RuntimeException(e);
-            }
-            LOG.info("Created {}.", target.getFileName());
-            return new PersistedFile(target, 0);
-        };
-    }
-
     public int getLevel() {
         return level;
     }
@@ -53,17 +34,32 @@ public class PersistedFile {
         return path;
     }
 
-    public static PersistedFile merge(byte category, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
+    public static PersistedFile fromInput(ByteBuffer buffer, AtomicLong counter, Path targetDir) {
+        byte category = buffer.get();
+        byte second = buffer.get();
+        long count = counter.getAndIncrement();
+        Path target = targetDir.resolve(String.format("%c%c_0_%d.txt", category, second, count));
+        try (SeekableByteChannel c = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
+            c.write(buffer.slice());
+        } catch (IOException e) {
+            LOG.error("Failed to persist {}: {}", target.getFileName(), e);
+            throw new RuntimeException(e);
+        }
+        LOG.info("Created {}.", target.getFileName());
+        return new PersistedFile(target, 0);
+    }
+
+    public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.format("%c_%d_%d.txt", category, newLevel, counter.getAndIncrement()));
+        Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
         try (FileOutputStream out = new FileOutputStream(target.toFile());
              FileInputStream fa = new FileInputStream(apf.path.toFile());
              FileInputStream fb = new FileInputStream(bpf.path.toFile())
                 /*RandomAccessFile out = new RandomAccessFile(target.toFile(), "w");
              RandomAccessFile fa = new RandomAccessFile(apf.path.toFile(), "r");
              RandomAccessFile fb = new RandomAccessFile(bpf.path.toFile(), "r")*/) {
-            ByteBuffer bufferA = ByteBuffer.allocate(10);
-            ByteBuffer bufferB = ByteBuffer.allocate(10);
+            ByteBuffer bufferA = ByteBuffer.allocate(8);
+            ByteBuffer bufferB = ByteBuffer.allocate(8);
 
             FileChannel channelA = fa.getChannel();
             FileChannel channelB = fb.getChannel();
@@ -75,7 +71,7 @@ public class PersistedFile {
             bufferB.flip();
 
             while (statusA && statusB) {
-                if (CompressedString.compare(bufferA, bufferB) < 0) {
+                if (Long.compareUnsigned(bufferA.getLong(), bufferB.getLong()) < 0) {
                     outChannel.write(bufferA);
                     bufferA.clear();
                     statusA = channelA.read(bufferA) != -1;
@@ -108,29 +104,36 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
-    public void decompress(Path target) throws IOException {
-        try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING);
-             SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
+    public void decompress(ByteChannel targetChannel, byte category, byte second) throws IOException {
+        try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
             ByteBuffer head = ByteBuffer.allocate(2);
+            head.put(category);
+            head.put(second);
+            head.flip();
+
             ByteBuffer compressedRest = ByteBuffer.allocate(8);
             ByteBuffer rest = ByteBuffer.allocate(14);
             rest.put(13, (byte) '\n');
 
-            while (inc.read(head) != -1 && inc.read(compressedRest) != -1) {
-                head.flip();
+            while (true) {
+                int read = inc.read(compressedRest);
+                if (read == -1) break;
+
                 compressedRest.flip();
-                long restCopy = compressedRest.asLongBuffer().get();
-                for (int i = 12; i >= 0; i--) {
-                    rest.put(i, (byte) (restCopy % 26 + 'a'));
-                    restCopy /= 26;
+                for (int resti = 0; resti < read / 8; resti++) {
+                    long restCopy = compressedRest.getLong();
+                    for (int i = 12; i >= 0; i--) {
+                        rest.put(i, (byte) (restCopy % 26 + 'a'));
+                        restCopy /= 26;
+                    }
+                    rest.position(14);
+                    rest.flip();
+                    targetChannel.write(head);
+                    head.position(0);
+                    targetChannel.write(rest);
+                    rest.clear();
                 }
-                rest.position(14);
-                rest.flip();
-                outc.write(head);
-                outc.write(rest);
-                head.clear();
                 compressedRest.clear();
-                rest.clear();
             }
         }
     }
