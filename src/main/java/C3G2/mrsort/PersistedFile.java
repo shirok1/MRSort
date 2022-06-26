@@ -11,7 +11,6 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -28,13 +27,12 @@ public class PersistedFile {
         this.level = level;
     }
 
-    static Supplier<PersistedFile> persist(AtomicLong counter, List<CompressedString> list) {
+    static Supplier<PersistedFile> persist(AtomicLong counter, List<CompressedString> list, Path targetDir) {
         return () -> {
             list.sort(null);
             long count = counter.getAndIncrement();
             byte category = list.get(0).getCategory();
-            Path sortedCache = Paths.get("C:\\Users\\Shiroki\\Code\\MRSort\\sorted\\");
-            Path target = sortedCache.resolve(String.format("%c_0_%d.txt", category, count));
+            Path target = targetDir.resolve(String.format("%c_0_%d.txt", category, count));
             try (SeekableByteChannel c = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
                 ByteBuffer cache = ByteBuffer.allocate(10);
                 for (CompressedString s : list) s.writeCompressedTo(c, cache);
@@ -55,10 +53,9 @@ public class PersistedFile {
         return path;
     }
 
-    public static PersistedFile merge(byte category, PersistedFile apf, PersistedFile bpf, AtomicLong counter) {
+    public static PersistedFile merge(byte category, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = Paths.get("C:\\Users\\Shiroki\\Code\\MRSort\\sorted\\",
-                String.format("%c_%d_%d.txt", category, newLevel, counter.getAndIncrement()));
+        Path target = targetDir.resolve(String.format("%c_%d_%d.txt", category, newLevel, counter.getAndIncrement()));
         try (FileOutputStream out = new FileOutputStream(target.toFile());
              FileInputStream fa = new FileInputStream(apf.path.toFile());
              FileInputStream fb = new FileInputStream(bpf.path.toFile())
