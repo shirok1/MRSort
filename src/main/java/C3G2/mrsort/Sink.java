@@ -128,6 +128,9 @@ public class Sink {
             }
 
             socket.close();
+
+            Thread.sleep(1000);
+
             LOG.info("Waiting for thread pool to empty...");
             while (executor.getQueue().size() != 0 && executor.getActiveCount() != 0) {
                 LOG.info("Still waiting...({} waiting, {} running)",
@@ -177,16 +180,24 @@ public class Sink {
 
     private static Consumer<PersistedFile> fileCreated(byte cat, byte sec, Set<PersistedFile> q, AtomicLong counter, Executor ex, Path cacheDir) {
         return file -> {
-            Optional<PersistedFile> best = q.stream().filter(b -> b.getLevel() == file.getLevel()).findFirst();
-            if (!best.isPresent())
-                best = q.stream().filter(levelInRange(file)).findFirst();
-            if (!best.isPresent()) {
-                q.add(file);
-            } else {
-                PersistedFile b = best.get();
-                q.remove(b);
-                CompletableFuture.supplyAsync(() -> PersistedFile.sortMerge(cat, sec, file, b, counter, cacheDir), ex)
-                        .thenAcceptAsync(fileCreated(cat, sec, q, counter, ex, cacheDir));
+            synchronized (q) {
+                Optional<PersistedFile> best = q.stream().filter(b -> b.getLevel() == file.getLevel()).findFirst();
+                if (!best.isPresent())
+                    best = q.stream().filter(levelInRange(file)).findFirst();
+                if (!best.isPresent()) {
+                    LOG.info("No best match, adding {} to [{}]",
+                            file.getPath().getFileName().toString(),
+                            q.stream().map(f -> f.getPath().getFileName().toString()).collect(Collectors.joining(", ")));
+                    q.add(file);
+                } else {
+                    PersistedFile b = best.get();
+                    LOG.info("Best match for {} found: {}",
+                            file.getPath().getFileName().toString(),
+                            b.getPath().getFileName().toString());
+                    q.remove(b);
+                    CompletableFuture.supplyAsync(() -> PersistedFile.sortMerge(cat, sec, file, b, counter, cacheDir), ex)
+                            .thenAcceptAsync(fileCreated(cat, sec, q, counter, ex, cacheDir));
+                }
             }
         };
     }
