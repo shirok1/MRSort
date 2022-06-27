@@ -45,13 +45,14 @@ public class PersistedFile {
             LOG.error("Failed to persist {}: {}", target.getFileName(), e);
             throw new RuntimeException(e);
         }
-        LOG.info("Created {}.", target.getFileName());
+//        LOG.info("Created {}.", target.getFileName());
         return new PersistedFile(target, 0);
     }
 
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
         Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
+        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         try (FileOutputStream out = new FileOutputStream(target.toFile());
              FileInputStream fa = new FileInputStream(apf.path.toFile());
              FileInputStream fb = new FileInputStream(bpf.path.toFile())
@@ -71,7 +72,10 @@ public class PersistedFile {
             bufferB.flip();
 
             while (statusA && statusB) {
-                if (Long.compareUnsigned(bufferA.getLong(), bufferB.getLong()) < 0) {
+                int compare = Long.compareUnsigned(bufferA.getLong(), bufferB.getLong());
+                bufferA.position(0);
+                bufferB.position(0);
+                if (compare < 0) {
                     outChannel.write(bufferA);
                     bufferA.clear();
                     statusA = channelA.read(bufferA) != -1;
