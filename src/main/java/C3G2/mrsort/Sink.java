@@ -43,17 +43,29 @@ public class Sink {
 
     private final static Logger LOG = LogManager.getLogger(Sink.class);
 
-    private static class Combo {
+    private static class CatCombo {
         public final byte category;
-        public final byte second;
-        public final ConcurrentSkipListSet<PersistedFile> queue;
-        public final AtomicLong counter;
 
-        public Combo(byte category, byte second) {
+        public final SecondCombo[] secondCombos;
+
+        static class SecondCombo {
+            public final byte second;
+            public final ConcurrentSkipListSet<PersistedFile> queue;
+            public final AtomicLong counter;
+
+            SecondCombo(byte second) {
+                this.second = second;
+                this.queue = new ConcurrentSkipListSet<>(Comparator.comparingInt(PersistedFile::getLevel));
+                this.counter = new AtomicLong(0);
+            }
+        }
+
+        public CatCombo(byte category) {
             this.category = category;
-            this.second = second;
-            this.queue = new ConcurrentSkipListSet<>(Comparator.comparingInt(PersistedFile::getLevel));
-            this.counter = new AtomicLong();
+            this.secondCombos = new SecondCombo[26];
+            for (int i = 0; i < 26; i++) {
+                this.secondCombos[i] = new SecondCombo((byte) (i + 'a'));
+            }
         }
     }
 
@@ -72,12 +84,10 @@ public class Sink {
             LOG.warn("Running a full sink. This should not happen in production environment.");
 
         try (ZContext context = new ZContext()) {
-            Combo[][] sinks = new Combo[parameter.end - parameter.start + 1][26];
+            CatCombo[] sinks = new CatCombo[parameter.end - parameter.start + 1];
             for (char i = parameter.start; i <= parameter.end; i++) {
-                for (char j = 'a'; j <= 'z'; j++) {
-                    LOG.debug("Creating sink for cat {} sec {}", i, j);
-                    sinks[i - parameter.start][j - 'a'] = new Combo((byte) i, (byte) j);
-                }
+                LOG.debug("Creating sink for cat {}", i);
+                sinks[i - parameter.start] = new CatCombo((byte) i);
             }
 
             Socket socket = context.createSocket(SocketType.PULL);
@@ -101,10 +111,11 @@ public class Sink {
                 byte cat = buffer.get(0);
                 byte sec = buffer.get(1);
 
-                Combo combo = sinks[cat - parameter.start][sec - 'a'];
-                PersistedFile persisted = PersistedFile.fromInput(buffer, combo.counter, parameter.cache);
+                CatCombo catCombo = sinks[cat - parameter.start];
+                CatCombo.SecondCombo secondCombo = catCombo.secondCombos[sec - 'a'];
+                PersistedFile persisted = PersistedFile.fromInput(buffer, secondCombo.counter, parameter.cache);
                 executor.execute(() ->
-                        fileCreated(cat, sec, combo.queue, combo.counter, executor, parameter.cache)
+                        fileCreated(cat, sec, secondCombo.queue, secondCombo.counter, executor, parameter.cache)
                                 .accept(persisted));
                 buffer.clear();
             }
@@ -127,17 +138,25 @@ public class Sink {
                 LOG.info("Result directory not existing, creating.");
                 Files.createDirectory(parameter.result);
             }
-            for (Combo[] catArray : sinks) {
-                byte cat = catArray[0].category;
-                byte sec = catArray[0].second;
-                List<PersistedFile> result = Arrays.stream(catArray).map(c -> c.queue.parallelStream()
-                        .reduce((a, b) -> PersistedFile.sortMerge
-                                (c.category, c.second, a, b, c.counter, parameter.cache)))
+            for (CatCombo catCombo : sinks) {
+                byte cat = catCombo.category;
+                class FileTuple {
+                    public final PersistedFile file;
+                    public final byte second;
+
+                    public FileTuple(PersistedFile file, byte second) {
+                        this.file = file;
+                        this.second = second;
+                    }
+                }
+                List<FileTuple> result = Arrays.stream(catCombo.secondCombos).map(c -> c.queue.parallelStream()
+                                .reduce((a, b) -> PersistedFile.sortMerge
+                                        (cat, c.second, a, b, c.counter, parameter.cache)).map(f->new FileTuple(f, c.second)))
                         .filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
                 LOG.info("String started with {} merged, now decompressing.", (char) cat);
                 Path target = parameter.result.resolve("result" + (char) cat + ".txt");
                 try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
-                    for (PersistedFile file : result) file.decompress(outc, cat, sec);
+                    for (FileTuple tpl : result) tpl.file.decompress(outc, cat, tpl.second);
                     LOG.info("Decompressed to {}.", target.getFileName());
                 } catch (IOException e) {
                     LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
