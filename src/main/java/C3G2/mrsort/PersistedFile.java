@@ -90,7 +90,7 @@ public class PersistedFile {
             channelB.close();
             outChannel.close();
 
-            LOG.info("Merged {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         } catch (IOException e) {
             LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }

@@ -1,5 +1,7 @@
 package c3g2.mrsort;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.zeromq.SocketType;
 import org.zeromq.ZContext;
 
@@ -22,7 +24,9 @@ import static java.nio.file.StandardOpenOption.READ;
 
 public class Pusher {
 
-    public static final int CAP = Integer.MAX_VALUE / 4096 / 32;
+    private final static Logger LOG = LogManager.getLogger(Pusher.class);
+
+    public static final int CAP = 1024 * 1024;
     public static final int BUFSIZE = 2 + 8 * CAP;
 
     static class PushChunk {
@@ -61,6 +65,8 @@ public class Pusher {
                 ? StreamSupport.stream(Files.newDirectoryStream(fromPath).spliterator(), false)
                 .filter(p -> p.getFileName().toString().matches("data0\\d.txt"))
                 : Stream.of(fromPath)).collect(Collectors.toList());
+        LOG.info("Selecting files: {}", files.stream().map(f -> f.getFileName().toString()).collect(Collectors.joining(", ")));
+
         PushChunk[][] chunks = new PushChunk[26][26];
         for (int i = 0; i < 26; i++) {
             for (int j = 0; j < 26; j++) {
@@ -76,7 +82,15 @@ public class Pusher {
             ByteBuffer buffer = ByteBuffer.allocate(16);
             for (Path file : files) {
                 try (SeekableByteChannel fc = Files.newByteChannel(file, READ)) {
+                    int count = 0;
+                    String fileName = file.getFileName().toString();
                     while (fc.read(buffer) != -1) {
+                        if (count % (16 * CAP) == 0) {
+                            count = 0;
+                            LOG.info("File: {} Position: {}", fileName, fc.position());
+                        }
+                        count++;
+
                         buffer.flip();
                         byte cat = buffer.get(0);
                         byte second = buffer.get(1);

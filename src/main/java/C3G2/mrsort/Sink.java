@@ -83,7 +83,7 @@ public class Sink {
         if (parameter.start == 'a' && parameter.end == 'z')
             LOG.warn("Running a full sink. This should not happen in production environment.");
 
-        if(!Files.isDirectory(parameter.cache)){
+        if (!Files.isDirectory(parameter.cache)) {
             LOG.warn("Cache dir not exists, creating.");
             Files.createDirectory(parameter.cache);
         }
@@ -100,7 +100,7 @@ public class Sink {
 
             LOG.info("Ready for PUSH! Port: {}", parameter.port);
 
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 16,
+            ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8,
                     0L, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>());
 
@@ -122,6 +122,8 @@ public class Sink {
                 executor.execute(() ->
                         fileCreated(cat, sec, secondCombo.queue, secondCombo.counter, executor, parameter.cache)
                                 .accept(persisted));
+                LOG.info("Created file {}, executor {} waiting, {} running.",
+                        persisted.getPath().getFileName(), executor.getQueue().size(), executor.getActiveCount());
                 buffer.clear();
             }
 
@@ -156,7 +158,7 @@ public class Sink {
                 }
                 List<FileTuple> result = Arrays.stream(catCombo.secondCombos).map(c -> c.queue.parallelStream()
                                 .reduce((a, b) -> PersistedFile.sortMerge
-                                        (cat, c.second, a, b, c.counter, parameter.cache)).map(f->new FileTuple(f, c.second)))
+                                        (cat, c.second, a, b, c.counter, parameter.cache)).map(f -> new FileTuple(f, c.second)))
                         .filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
                 LOG.info("String started with {} merged, now decompressing.", (char) cat);
                 Path target = parameter.result.resolve("result" + (char) cat + ".txt");
