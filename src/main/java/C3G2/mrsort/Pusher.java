@@ -7,11 +7,16 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static java.nio.file.StandardOpenOption.READ;
 
@@ -50,7 +55,12 @@ public class Pusher {
         }
     }
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws InterruptedException, IOException {
+        Path fromPath = Paths.get(Arrays.stream(args).findFirst().orElse("C:\\Users\\Shiroki\\Code\\MRSort\\data01.txt"));
+        List<Path> files = (Files.isDirectory(fromPath)
+                ? StreamSupport.stream(Files.newDirectoryStream(fromPath).spliterator(), false)
+                .filter(p -> p.getFileName().toString().matches("data0\\d.txt"))
+                : Stream.of(fromPath)).collect(Collectors.toList());
         PushChunk[][] chunks = new PushChunk[26][26];
         for (int i = 0; i < 26; i++) {
             for (int j = 0; j < 26; j++) {
@@ -64,38 +74,41 @@ public class Pusher {
             org.zeromq.ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
             socket.connect("tcp://localhost:5555");
             ByteBuffer buffer = ByteBuffer.allocate(16);
-            try (SeekableByteChannel fc = Files.newByteChannel(Paths.get("C:\\Users\\Shiroki\\Code\\MRSort\\data01.txt"), READ)) {
-                while (fc.read(buffer) != -1) {
-                    buffer.flip();
-                    byte cat = buffer.get(0);
-                    byte second = buffer.get(1);
-                    long rest = 0L;
-                    for (int i = 2; i < 15; i++) {
-                        rest = rest * 26 + buffer.get(i) - 'a';
-                    }
-                    buffer.clear();
-                    PushChunk chunk = chunks[cat - 'a'][second - 'a'];
-                    chunk.add(rest);
-                    if (chunk.getSize() == CAP) {
-                        int size = chunk.getSize();
-                        long[] data = chunk.getAndReset(CAP);
-                        executor.execute(() -> {
-                            ByteBuffer sendBuffer = ByteBuffer.allocate(BUFSIZE);
-                            Arrays.sort(data);
-                            sendBuffer.put(cat);
-                            sendBuffer.put(second);
-                            for (int i = 0; i < size; i++) {
-                                sendBuffer.putLong(data[i]);
-                            }
-                            sendBuffer.flip();
-                            socket.sendByteBuffer(sendBuffer, 0);
-                        });
-                    }
+            for (Path file : files) {
+                try (SeekableByteChannel fc = Files.newByteChannel(file, READ)) {
+                    while (fc.read(buffer) != -1) {
+                        buffer.flip();
+                        byte cat = buffer.get(0);
+                        byte second = buffer.get(1);
+                        long rest = 0L;
+                        for (int i = 2; i < 15; i++) {
+                            rest = rest * 26 + buffer.get(i) - 'a';
+                        }
+                        buffer.clear();
+                        PushChunk chunk = chunks[cat - 'a'][second - 'a'];
+                        chunk.add(rest);
+                        if (chunk.getSize() == CAP) {
+                            int size = chunk.getSize();
+                            long[] data = chunk.getAndReset(CAP);
+                            executor.execute(() -> {
+                                ByteBuffer sendBuffer = ByteBuffer.allocate(BUFSIZE);
+                                Arrays.sort(data);
+                                sendBuffer.put(cat);
+                                sendBuffer.put(second);
+                                for (int i = 0; i < size; i++) {
+                                    sendBuffer.putLong(data[i]);
+                                }
+                                sendBuffer.flip();
+                                socket.sendByteBuffer(sendBuffer, 0);
+                            });
+                        }
 
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
             }
+
 
             for (int i = 0; i < 26; i++) {
                 for (int j = 0; j < 26; j++) {
