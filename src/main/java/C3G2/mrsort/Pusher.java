@@ -83,11 +83,22 @@ public class Pusher {
             for (Path file : files) {
                 try (SeekableByteChannel fc = Files.newByteChannel(file, READ)) {
                     int count = 0;
+                    long fileSize = fc.size();
+                    long lastTime = System.currentTimeMillis();
+                    long lastPosition = System.currentTimeMillis();
                     String fileName = file.getFileName().toString();
                     while (fc.read(buffer) != -1) {
                         if (count % (16 * CAP) == 0) {
                             count = 0;
-                            LOG.info("File: {} Position: {}", fileName, fc.position());
+                            long now = System.currentTimeMillis();
+                            long position = fc.position();
+                            long speed = (position - lastPosition) / (now - lastTime + 1); // b/ms == kb/s
+                            long remain = (fileSize - position) / (speed + 1) / 1024;
+                            LOG.info(String.format("File: %s(%,dMb) Position: %,dMb Speed: %,dKb/s Remain: %d:%d",
+                                    fileName, fileSize / (1024 * 1024), fc.position() / (1024 * 1024),
+                                    speed, remain / 60, remain % 60));
+                            lastTime = now;
+                            lastPosition = position;
                         }
                         count++;
 
