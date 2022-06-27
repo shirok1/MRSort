@@ -69,7 +69,7 @@ public class Sink {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         SinkArgs parameter = new SinkArgs();
         JCommander.newBuilder()
                 .addObject(parameter)
@@ -82,6 +82,11 @@ public class Sink {
 
         if (parameter.start == 'a' && parameter.end == 'z')
             LOG.warn("Running a full sink. This should not happen in production environment.");
+
+        if(!Files.isDirectory(parameter.cache)){
+            LOG.warn("Cache dir not exists, creating.");
+            Files.createDirectory(parameter.cache);
+        }
 
         try (ZContext context = new ZContext()) {
             CatCombo[] sinks = new CatCombo[parameter.end - parameter.start + 1];
