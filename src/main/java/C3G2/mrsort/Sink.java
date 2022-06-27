@@ -19,7 +19,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -130,19 +130,14 @@ public class Sink {
             for (Combo[] catArray : sinks) {
                 byte cat = catArray[0].category;
                 byte sec = catArray[0].second;
-                Stream<PersistedFile> result = Arrays.stream(catArray).map(c -> c.queue.parallelStream()
+                List<PersistedFile> result = Arrays.stream(catArray).map(c -> c.queue.parallelStream()
                         .reduce((a, b) -> PersistedFile.sortMerge
-                                (c.category, c.second, a, b, c.counter, parameter.cache))).filter(Optional::isPresent).map(Optional::get);
+                                (c.category, c.second, a, b, c.counter, parameter.cache)))
+                        .filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
                 LOG.info("String started with {} merged, now decompressing.", (char) cat);
                 Path target = parameter.result.resolve("result" + (char) cat + ".txt");
                 try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
-                    result.forEach(f -> {
-                        try {
-                            f.decompress(outc, cat, sec);
-                        } catch (IOException e) {
-                            LOG.error("Failed to decompress {}: {}", f.getPath().getFileName(), e);
-                        }
-                    });
+                    for (PersistedFile file : result) file.decompress(outc, cat, sec);
                     LOG.info("Decompressed to {}.", target.getFileName());
                 } catch (IOException e) {
                     LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
