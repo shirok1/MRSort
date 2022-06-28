@@ -99,7 +99,7 @@ public class Pusher {
                             long filePosition = fc.position();
                             long speed = (filePosition - lastPosition) / (now - lastTime + 1); // b/ms == kb/s
                             long remain = (fileSize - filePosition) / (speed + 1) / 1024;
-                            LOG.info(String.format("File: %s(%,dMb) Position: %,dMb Speed: %,dKb/s Remain: %d:%02d",
+                            LOG.info(String.format("[Sending] File: %s(%,dMb) Position: %,dMb Speed: %,dKb/s Remain: %d:%02d",
                                     fileName, fileSize / (1024 * 1024), fc.position() / (1024 * 1024),
                                     speed, remain / 60, remain % 60));
                             lastTime = now;
@@ -137,7 +137,7 @@ public class Pusher {
                         buffer.clear();
                     }
                     long timeElapsed = System.currentTimeMillis() - startTime;
-                    LOG.info(String.format("File: %s(%,dMb) finished. Time: %d:%02d Avg Speed: %,dKb/s",
+                    LOG.info(String.format("[Sending] File: %s(%,dMb) finished. Time: %d:%02d Avg Speed: %,dKb/s",
                             fileName, fileSize / (1024 * 1024),
                             timeElapsed / 1024 / 60, timeElapsed / 1024 % 60, fileSize / timeElapsed));
                     System.gc();
@@ -178,6 +178,7 @@ public class Pusher {
                 System.out.println("Waiting for executor to terminate");
             }
             socket.send("", 0);
+            LOG.info("All done.");
             socket.close();
         }
     }
