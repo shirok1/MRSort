@@ -3,8 +3,6 @@ package c3g2.mrsort;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -60,10 +58,7 @@ public class PersistedFile {
     }
 
 
-    private static PersistedFile sortMergeMapped(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
-        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+    private static void sortMergeMapped(PersistedFile apf, PersistedFile bpf, Path target) throws IOException {
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
              FileChannel channelB = FileChannel.open(bpf.path, READ)) {
@@ -95,26 +90,10 @@ public class PersistedFile {
             closeDirectBuffer(bufferA);
             closeDirectBuffer(bufferB);
             closeDirectBuffer(outBuffer);
-            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
-        } catch (IOException e) {
-            LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }
-
-//        System.gc();
-
-        try {
-            Files.delete(apf.path);
-            Files.delete(bpf.path);
-        } catch (IOException e) {
-            LOG.warn("Failed to delete {} and {}: {}", apf.path.getFileName(), bpf.path.getFileName(), e);
-        }
-        return new PersistedFile(target, newLevel);
     }
 
-    private static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
-        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+    private static void sortMergeBuffered(PersistedFile apf, PersistedFile bpf, Path target) throws IOException {
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
              FileChannel channelB = FileChannel.open(bpf.path, READ)) {
@@ -155,19 +134,7 @@ public class PersistedFile {
             outChannel.write(outBuffer);
             outChannel.write(bufferA);
             outChannel.write(bufferB);
-
-            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
-        } catch (IOException e) {
-            LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }
-
-        try {
-            Files.delete(apf.path);
-            Files.delete(bpf.path);
-        } catch (IOException e) {
-            LOG.warn("Failed to delete {} and {}: {}", apf.path.getFileName(), bpf.path.getFileName(), e);
-        }
-        return new PersistedFile(target, newLevel);
     }
 
     private static void closeDirectBuffer(Buffer buffer) {
@@ -184,11 +151,27 @@ public class PersistedFile {
     }
 
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        if (apf.path.toFile().length() + bpf.path.toFile().length() < Integer.MAX_VALUE) {
-            return sortMergeMapped(category, second, apf, bpf, counter, targetDir);
-        } else {
-            return sortMergeBuffered(category, second, apf, bpf, counter, targetDir);
+        int newLevel = Integer.max(apf.level, bpf.level) + 1;
+        Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
+        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+        try {
+            if (apf.path.toFile().length() + bpf.path.toFile().length() < Integer.MAX_VALUE) {
+                sortMergeMapped(apf, bpf, target);
+            } else {
+                sortMergeBuffered(apf, bpf, target);
+            }
+            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+        } catch (IOException e) {
+            LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }
+
+        try {
+            Files.delete(apf.path);
+            Files.delete(bpf.path);
+        } catch (IOException e) {
+            LOG.warn("Failed to delete {} and {}: {}", apf.path.getFileName(), bpf.path.getFileName(), e);
+        }
+        return new PersistedFile(target, newLevel);
     }
 
     public void decompress(ByteChannel targetChannel, byte category, byte second, ByteBuffer readBuffer, ByteBuffer writeBuffer) throws IOException {
