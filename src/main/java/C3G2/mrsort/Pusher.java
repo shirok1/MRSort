@@ -79,13 +79,13 @@ public class Pusher {
         try (ZContext context = new ZContext(8)) {
             org.zeromq.ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
             socket.connect("tcp://localhost:5555");
-            ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
+            ByteBuffer buffer = ByteBuffer.allocate(512 * 1024 * 1024);
             for (Path file : files) {
                 try (SeekableByteChannel fc = Files.newByteChannel(file, READ)) {
-                    int count = 0;
                     long fileSize = fc.size();
-                    long lastTime = System.currentTimeMillis();
-                    long lastPosition = System.currentTimeMillis();
+                    long startTime = System.currentTimeMillis();
+                    long lastTime = startTime;
+                    long lastPosition = fc.position();
                     String fileName = file.getFileName().toString();
                     while (true) {
                         int read = fc.read(buffer);
@@ -93,33 +93,31 @@ public class Pusher {
 
                         buffer.flip();
 
-                        if (count % 1024 == 0) {
-                            count = 0;
+                        {
                             long now = System.currentTimeMillis();
-                            long position = fc.position();
-                            long speed = (position - lastPosition) / (now - lastTime + 1); // b/ms == kb/s
-                            long remain = (fileSize - position) / (speed + 1) / 1024;
-                            LOG.info(String.format("File: %s(%,dMb) Position: %,dMb Speed: %,dKb/s Remain: %d:%d",
+                            long filePosition = fc.position();
+                            long speed = (filePosition - lastPosition) / (now - lastTime + 1); // b/ms == kb/s
+                            long remain = (fileSize - filePosition) / (speed + 1) / 1024;
+                            LOG.info(String.format("File: %s(%,dMb) Position: %,dMb Speed: %,dKb/s Remain: %d:%02d",
                                     fileName, fileSize / (1024 * 1024), fc.position() / (1024 * 1024),
                                     speed, remain / 60, remain % 60));
                             lastTime = now;
-                            lastPosition = position;
+                            lastPosition = filePosition;
                         }
-                        count++;
 
-                        for (int position = 0; position < read; position += 16) {
-                            byte cat = buffer.get(position);
-                            byte second = buffer.get(position + 1);
+                        for (int offset = 0; offset < read; offset += 16) {
+                            byte cat = buffer.get(offset);
+                            byte second = buffer.get(offset + 1);
                             long rest = 0L;
                             for (int i = 2; i < 15; i++) {
-                                rest = rest * 26 + buffer.get(position + i) - 'a';
+                                rest = rest * 26 + buffer.get(offset + i) - 'a';
                             }
                             PushChunk chunk = chunks[cat - 'a'][second - 'a'];
                             chunk.add(rest);
                             if (chunk.getSize() == CAP) {
                                 int size = chunk.getSize();
                                 long[] data = chunk.getAndReset(CAP);
-//                                Thread.sleep(2);
+                                Thread.sleep(2);
                                 executor.execute(() -> {
                                     ByteBuffer sendBuffer = ByteBuffer.allocate(BUFSIZE);
                                     Arrays.sort(data);
@@ -135,6 +133,10 @@ public class Pusher {
                         }
                         buffer.clear();
                     }
+                    long timeElapsed = System.currentTimeMillis() - startTime;
+                    LOG.info(String.format("File: %s(%,dMb) finished. Time: %d:%02d Avg Speed: %,dKb/s",
+                            fileName, fileSize / (1024 * 1024),
+                            timeElapsed / 60, timeElapsed % 60, fileSize / timeElapsed / 1024));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
