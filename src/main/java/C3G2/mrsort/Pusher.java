@@ -258,12 +258,14 @@ public class Pusher {
                     for (int count = 0; count < size; count++) {
                         sendBuffer.putLong(data[count]);
                     }
-                    sendBuffer.putInt(BUF_SIZE - 4, size);
+                    sendBuffer.putInt(BUF_SIZE - 4, sendBuffer.position());
+                    sendBuffer.position(BUF_SIZE);
                     sendBuffer.flip();
                     ZMQ.Socket soc = disp.getSocketForCat(cat);
                     LOG.info("Sending rest of {}{} to {}", (char) cat, (char) second, soc.getLastEndpoint());
                     soc.sendByteBuffer(sendBuffer, 0);
                     sendBuffer.clear();
+                    Thread.sleep(5);
                 }
             }
 

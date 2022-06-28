@@ -123,7 +123,7 @@ public class Sink {
                 byte sec = buffer.get(1);
 
                 if (cat >= parameter.start - 'a' + 'A' && cat <= parameter.end - 'a' + 'A') {
-                    cat = (byte) (cat - 'a' + 'A');
+                    cat = (byte) (cat + 'a' - 'A');
                     buffer.limit(buffer.getInt(Pusher.BUF_SIZE - 4));
                 } else if (cat < parameter.start || cat > parameter.end) {
                     LOG.warn("Received invalid head: {}{}", (char) cat, (char) sec);
