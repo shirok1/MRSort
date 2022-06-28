@@ -140,12 +140,13 @@ public class Pusher {
                     LOG.info(String.format("File: %s(%,dMb) finished. Time: %d:%02d Avg Speed: %,dKb/s",
                             fileName, fileSize / (1024 * 1024),
                             timeElapsed / 1024 / 60, timeElapsed / 1024 % 60, fileSize / timeElapsed));
+                    System.gc();
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
             }
 
-
+            ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
             for (int i = 0; i < 26; i++) {
                 for (int j = 0; j < 26; j++) {
                     PushChunk chunk = chunks[i][j];
@@ -153,7 +154,6 @@ public class Pusher {
                     long[] data = chunk.getData();
                     byte cat = (byte) (i + 'a');
                     byte second = (byte) (j + 'a');
-                    ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
                     Arrays.sort(data, 0, size);
                     sendBuffer.put(cat);
                     sendBuffer.put(second);
@@ -162,13 +162,22 @@ public class Pusher {
                     }
                     sendBuffer.flip();
                     socket.sendByteBuffer(sendBuffer, 0);
+                    sendBuffer.clear();
                 }
+            }
+
+            LOG.info("Waiting for thread pool to empty...");
+            while (executor.getQueue().size() != 0 && executor.getActiveCount() != 0) {
+                LOG.info("Still waiting...({} waiting, {} running)",
+                        executor.getQueue().size(), executor.getActiveCount());
+                //noinspection BusyWait
+                Thread.sleep(500);
             }
             executor.shutdown();
             while (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
                 System.out.println("Waiting for executor to terminate");
             }
-            socket.send("");
+            socket.send("", 0);
             socket.close();
         }
     }

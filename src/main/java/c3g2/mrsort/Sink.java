@@ -101,7 +101,7 @@ public class Sink {
 
             LOG.info("Ready for PUSH! Port: {}", parameter.port);
 
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8,
+            ThreadPoolExecutor executor = new ThreadPoolExecutor(4, 4,
                     0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
             ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUF_SIZE);
