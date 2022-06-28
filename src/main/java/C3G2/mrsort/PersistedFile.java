@@ -6,6 +6,9 @@ import org.apache.logging.log4j.Logger;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.ByteChannel;
@@ -57,7 +60,7 @@ public class PersistedFile {
     }
 
 
-    public static PersistedFile sortMergeMapped(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
+    private static PersistedFile sortMergeMapped(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
         Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
@@ -89,12 +92,15 @@ public class PersistedFile {
 //            if (cleaner != null) {
 //                cleaner.clean();
 //            }
+            closeDirectBuffer(bufferA);
+            closeDirectBuffer(bufferB);
+            closeDirectBuffer(outBuffer);
             LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         } catch (IOException e) {
             LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }
 
-        System.gc();
+//        System.gc();
 
         try {
             Files.delete(apf.path);
@@ -105,17 +111,17 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
-    public static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
+    private static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
         Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
              FileChannel channelB = FileChannel.open(bpf.path, READ)) {
-            ByteBuffer bufferA = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelA.size()));
-            ByteBuffer bufferB = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelB.size()));
+            ByteBuffer bufferA = ByteBuffer.allocate((int) Long.min(Integer.MAX_VALUE, channelA.size()));
+            ByteBuffer bufferB = ByteBuffer.allocate((int) Long.min(Integer.MAX_VALUE, channelB.size()));
 
-            ByteBuffer outBuffer = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelA.size() + channelB.size()));
+            ByteBuffer outBuffer = ByteBuffer.allocate((int) Long.min(Integer.MAX_VALUE, channelA.size() + channelB.size()));
 
             boolean statusA = channelA.read(bufferA) != -1;
             boolean statusB = channelB.read(bufferB) != -1;
@@ -164,69 +170,25 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
+    private static void closeDirectBuffer(Buffer buffer) {
+        try {
+            Method cleanerMethod = buffer.getClass().getMethod("cleaner");
+            cleanerMethod.setAccessible(true);
+            Object cleaner = cleanerMethod.invoke(buffer);
+            Method cleanMethod = cleaner.getClass().getMethod("clean");
+            cleanMethod.setAccessible(true);
+            cleanMethod.invoke(cleaner);
+        } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+            LOG.warn("Failed to close buffer: {}", e.toString());
+        }
+    }
+
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        if (apf.path.toFile().length() + bpf.path.toFile().length() <= Integer.MAX_VALUE) {
+        if (apf.path.toFile().length() + bpf.path.toFile().length() < Integer.MAX_VALUE) {
+            return sortMergeMapped(category, second, apf, bpf, counter, targetDir);
+        } else {
             return sortMergeBuffered(category, second, apf, bpf, counter, targetDir);
         }
-
-        LOG.warn("Using non-MappedByteBuffer for {} and {}", apf.path.getFileName(), bpf.path.getFileName());
-
-        int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
-        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
-        try (FileOutputStream out = new FileOutputStream(target.toFile());
-             FileInputStream fa = new FileInputStream(apf.path.toFile());
-             FileInputStream fb = new FileInputStream(bpf.path.toFile())
-                /*RandomAccessFile out = new RandomAccessFile(target.toFile(), "w");
-             RandomAccessFile fa = new RandomAccessFile(apf.path.toFile(), "r");
-             RandomAccessFile fb = new RandomAccessFile(bpf.path.toFile(), "r")*/) {
-            ByteBuffer bufferA = ByteBuffer.allocate(8);
-            ByteBuffer bufferB = ByteBuffer.allocate(8);
-
-            FileChannel channelA = fa.getChannel();
-            FileChannel channelB = fb.getChannel();
-            FileChannel outChannel = out.getChannel();
-
-            boolean statusA = channelA.read(bufferA) != -1;
-            boolean statusB = channelB.read(bufferB) != -1;
-            bufferA.flip();
-            bufferB.flip();
-
-            while (statusA && statusB) {
-                int compare = Long.compareUnsigned(bufferA.getLong(), bufferB.getLong());
-                bufferA.position(0);
-                bufferB.position(0);
-                if (compare < 0) {
-                    outChannel.write(bufferA);
-                    bufferA.clear();
-                    statusA = channelA.read(bufferA) != -1;
-                    bufferA.flip();
-                } else {
-                    outChannel.write(bufferB);
-                    bufferB.clear();
-                    statusB = channelB.read(bufferB) != -1;
-                    bufferB.flip();
-                }
-            }
-            channelA.transferTo(channelA.position(), channelA.size(), outChannel);
-            channelB.transferTo(channelB.position(), channelB.size(), outChannel);
-
-            channelA.close();
-            channelB.close();
-            outChannel.close();
-
-            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
-        } catch (IOException e) {
-            LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
-        }
-
-        try {
-            Files.delete(apf.path);
-            Files.delete(bpf.path);
-        } catch (IOException e) {
-            LOG.warn("Failed to delete {} and {}: {}", apf.path.getFileName(), bpf.path.getFileName(), e);
-        }
-        return new PersistedFile(target, newLevel);
     }
 
     public void decompress(ByteChannel targetChannel, byte category, byte second, ByteBuffer readBuffer, ByteBuffer writeBuffer) throws IOException {
