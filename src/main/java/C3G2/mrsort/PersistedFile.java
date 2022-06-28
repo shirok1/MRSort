@@ -155,7 +155,8 @@ public class PersistedFile {
         Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         try {
-            if (apf.path.toFile().length() + bpf.path.toFile().length() < Integer.MAX_VALUE) {
+            long lenSum = apf.path.toFile().length() + bpf.path.toFile().length();
+            if (lenSum > 128 * 1024 * 1024 && lenSum < Integer.MAX_VALUE) {
                 sortMergeMapped(apf, bpf, target);
             } else {
                 sortMergeBuffered(apf, bpf, target);
