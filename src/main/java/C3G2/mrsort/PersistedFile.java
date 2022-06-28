@@ -107,7 +107,7 @@ public class PersistedFile {
 
     public static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement());
+        Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
@@ -115,7 +115,7 @@ public class PersistedFile {
             ByteBuffer bufferA = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelA.size()));
             ByteBuffer bufferB = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelB.size()));
 
-            ByteBuffer outBuffer = ByteBuffer.allocateDirect((int) (channelA.size() + channelB.size()));
+            ByteBuffer outBuffer = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelA.size() + channelB.size()));
 
             boolean statusA = channelA.read(bufferA) != -1;
             boolean statusB = channelB.read(bufferB) != -1;
@@ -145,6 +145,7 @@ public class PersistedFile {
                 }
             }
 
+            outBuffer.flip();
             outChannel.write(outBuffer);
             outChannel.write(bufferA);
             outChannel.write(bufferB);
