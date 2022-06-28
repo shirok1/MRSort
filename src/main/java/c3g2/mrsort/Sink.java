@@ -122,6 +122,12 @@ public class Sink {
                 byte cat = buffer.get(0);
                 byte sec = buffer.get(1);
 
+                if (cat < parameter.start || cat > parameter.end) {
+                    LOG.warn("Received invalid cat: {}", (char) cat);
+                    buffer.clear();
+                    continue;
+                }
+
                 CatCombo catCombo = sinks[cat - parameter.start];
                 CatCombo.SecondCombo secondCombo = catCombo.secondCombos[sec - 'a'];
                 PersistedFile persisted = PersistedFile.fromInput(buffer, secondCombo.counter, parameter.cache);
