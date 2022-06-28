@@ -173,8 +173,7 @@ public class PersistedFile {
 
     public void decompress(ByteChannel targetChannel, byte category, byte second) throws IOException {
         try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
-
-            int ioBufferSize = 1024 * 1024;
+            int ioBufferSize = 1024 * 1024 * 32;
             ByteBuffer readBuffer = ByteBuffer.allocate(ioBufferSize);
             ByteBuffer writeBuffer = ByteBuffer.allocate(ioBufferSize * 2);
 
@@ -199,5 +198,6 @@ public class PersistedFile {
                 writeBuffer.clear();
             }
         }
+        LOG.info("{} is decompressed.", path.getFileName());
     }
 }
