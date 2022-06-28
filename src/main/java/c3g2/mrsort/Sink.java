@@ -188,9 +188,9 @@ public class Sink {
                 if (!best.isPresent())
                     best = q.stream().filter(levelInRange(file)).findFirst();
                 if (!best.isPresent()) {
-                    LOG.info("No best match, adding {} to [{}]", file.getFileName(),
-                            q.stream().map(PersistedFile::getFileName).collect(Collectors.joining(", ")));
                     q.add(file);
+                    LOG.info("No best match, the queue is now [{}]",
+                            q.stream().map(PersistedFile::getFileName).collect(Collectors.joining(", ")));
                 } else {
                     PersistedFile b = best.get();
                     LOG.info("Best match for {} found: {}", file.getFileName(), b.getFileName());
