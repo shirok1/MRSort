@@ -61,7 +61,7 @@ public class PersistedFile {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
         Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
-        try (FileChannel outChannel = FileChannel.open(target, WRITE, CREATE, TRUNCATE_EXISTING);
+        try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
              FileChannel channelB = FileChannel.open(bpf.path, READ)) {
             MappedByteBuffer bufferA = channelA.map(READ_ONLY, 0, channelA.size());
@@ -106,7 +106,7 @@ public class PersistedFile {
     }
 
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        if(apf.path.toFile().length() <= Integer.MAX_VALUE && bpf.path.toFile().length() <= Integer.MAX_VALUE) {
+        if (apf.path.toFile().length() <= Integer.MAX_VALUE && bpf.path.toFile().length() <= Integer.MAX_VALUE) {
             // use MappedByteBuffer
             return sortMergeMapped(category, second, apf, bpf, counter, targetDir);
         }
