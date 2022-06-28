@@ -110,34 +110,30 @@ public class PersistedFile {
 
     public void decompress(ByteChannel targetChannel, byte category, byte second) throws IOException {
         try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
-            ByteBuffer head = ByteBuffer.allocate(2);
-            head.put(category);
-            head.put(second);
-            head.flip();
 
-            ByteBuffer compressedRest = ByteBuffer.allocate(8);
-            ByteBuffer rest = ByteBuffer.allocate(14);
-            rest.put(13, (byte) '\n');
+            int ioBufferSize = 1024 * 1024;
+            ByteBuffer readBuffer = ByteBuffer.allocate(ioBufferSize);
+            ByteBuffer writeBuffer = ByteBuffer.allocate(ioBufferSize * 2);
 
-            while (true) {
-                int read = inc.read(compressedRest);
-                if (read == -1) break;
-
-                compressedRest.flip();
-                for (int resti = 0; resti < read / 8; resti++) {
-                    long restCopy = compressedRest.getLong();
-                    for (int i = 12; i >= 0; i--) {
-                        rest.put(i, (byte) (restCopy % 26 + 'a'));
+            while (inc.read(readBuffer) != -1) {
+                readBuffer.flip();
+                while (readBuffer.hasRemaining()) {
+                    int offset = writeBuffer.position();
+                    writeBuffer.put(category);
+                    writeBuffer.put(second);
+                    long restCopy = readBuffer.getLong();
+                    for (int i = 14; i >= 2; i--) {
+                        writeBuffer.put(offset + i, (byte) (restCopy % 26 + 'a'));
                         restCopy /= 26;
                     }
-                    rest.position(14);
-                    rest.flip();
-                    targetChannel.write(head);
-                    head.position(0);
-                    targetChannel.write(rest);
-                    rest.clear();
+                    writeBuffer.position(offset + 15);
+                    writeBuffer.put((byte) '\n');
                 }
-                compressedRest.clear();
+                writeBuffer.flip();
+                targetChannel.write(writeBuffer);
+
+                readBuffer.clear();
+                writeBuffer.clear();
             }
         }
     }
