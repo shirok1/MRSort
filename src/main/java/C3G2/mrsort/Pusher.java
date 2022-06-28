@@ -224,7 +224,9 @@ public class Pusher {
                                         sendBuffer.putLong(data[i]);
                                     }
                                     sendBuffer.flip();
-                                    disp.getSocketForCat(cat).sendByteBuffer(sendBuffer, 0);
+                                    ZMQ.Socket soc = disp.getSocketForCat(cat);
+                                    LOG.info("Sending a full pack of {}{} to {}", (char) cat, (char) second, soc.getLastEndpoint());
+                                    soc.sendByteBuffer(sendBuffer, 0);
                                 });
                             }
                         }
@@ -255,7 +257,9 @@ public class Pusher {
                         sendBuffer.putLong(data[count]);
                     }
                     sendBuffer.flip();
-                    disp.getSocketForCat(cat).sendByteBuffer(sendBuffer, 0);
+                    ZMQ.Socket soc = disp.getSocketForCat(cat);
+                    LOG.info("Sending rest of {}{} to {}", (char) cat, (char) second, soc.getLastEndpoint());
+                    soc.sendByteBuffer(sendBuffer, 0);
                     sendBuffer.clear();
                 }
             }
