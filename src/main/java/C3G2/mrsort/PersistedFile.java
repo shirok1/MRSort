@@ -107,7 +107,7 @@ public class PersistedFile {
 
     public static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
-        Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
+        Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement());
         LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
