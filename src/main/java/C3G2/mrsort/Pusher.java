@@ -150,7 +150,7 @@ public class Pusher {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
-        if (args.length != 0 && args.length != 1 && args.length != 8) {
+        if (args.length != 0 && args.length != 1 && args.length != 9) {
             LOG.error("Don't know what to do!");
             System.exit(1);
         }
@@ -171,7 +171,7 @@ public class Pusher {
         Runtime runtime = Runtime.getRuntime();
         ThreadPoolExecutor executor = new ThreadPoolExecutor(6, 6,
                 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-        try (Dispatcher disp = args.length != 8
+        try (Dispatcher disp = args.length != 9
                 ? Dispatcher.local()
                 : new Dispatcher(Arrays.stream(args).limit(8).map(String::trim))) {
             ByteBuffer buffer = ByteBuffer.allocate(512 * 1024 * 1024);

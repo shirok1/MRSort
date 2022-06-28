@@ -26,9 +26,12 @@ import static java.nio.file.StandardOpenOption.*;
 public class Sink {
     static class SinkArgs {
         @Parameter(names = {"-s", "--start"})
-        public char start = 'a';
+        public String startArg = "a";
 
         @Parameter(names = {"-e", "--end"})
+        public String endArg = "z";
+
+        public char start = 'a';
         public char end = 'z';
 
         @Parameter(names = {"-p", "--port"})
@@ -75,6 +78,9 @@ public class Sink {
                 .addObject(parameter)
                 .build()
                 .parse(args);
+
+        parameter.start = parameter.startArg.charAt(0);
+        parameter.end = parameter.endArg.charAt(0);
 
         assert parameter.start <= parameter.end;
 
