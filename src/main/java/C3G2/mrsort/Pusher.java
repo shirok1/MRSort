@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.zeromq.SocketType;
 import org.zeromq.ZContext;
+import org.zeromq.ZMQ;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -59,8 +61,101 @@ public class Pusher {
         }
     }
 
+
+    static class Dispatcher implements AutoCloseable {
+        private final ZContext context;
+        private final List<ZMQ.Socket> sockets;
+
+        private final boolean isLocal;
+
+        Dispatcher(Stream<String> ips) {
+            context = new ZContext(8);
+            context.setSndHWM(1024 * 1024);
+
+            sockets = ips.map(ip -> {
+                ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
+                socket.connect("tcp://" + ip + ":5555");
+                return socket;
+            }).collect(Collectors.toList());
+
+            if (sockets.size() == 8) {
+                isLocal = false;
+                LOG.info("Connected to 8 Sinks.");
+            } else if (sockets.size() == 1) {
+                isLocal = true;
+                LOG.info("Localhost mode.");
+            } else {
+                throw new IllegalArgumentException("Wrong number of IPs given.");
+            }
+        }
+
+        public ZMQ.Socket getSocketForCat(byte cat) {
+            if (isLocal) {
+                return sockets.get(0);
+            } else {
+                switch (cat) {
+                    case 'a':
+                    case 'b':
+                    case 'c':
+                    case 'd':
+                        return sockets.get(0);
+                    case 'e':
+                    case 'f':
+                    case 'g':
+                    case 'h':
+                        return sockets.get(1);
+                    case 'i':
+                    case 'j':
+                    case 'k':
+                        return sockets.get(2);
+                    case 'l':
+                    case 'm':
+                    case 'n':
+                        return sockets.get(3);
+                    case 'o':
+                    case 'p':
+                    case 'q':
+                        return sockets.get(4);
+                    case 'r':
+                    case 's':
+                    case 't':
+                        return sockets.get(5);
+                    case 'u':
+                    case 'v':
+                    case 'w':
+                        return sockets.get(6);
+                    case 'x':
+                    case 'y':
+                    case 'z':
+                        return sockets.get(7);
+                    default:
+                        throw new IllegalArgumentException("Invalid category: " + cat);
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            sockets.forEach(ZMQ.Socket::close);
+            context.close();
+        }
+
+        public static Dispatcher local() {
+            return new Dispatcher(Stream.of("localhost"));
+        }
+
+        public void foreach(Consumer<ZMQ.Socket> consumer) {
+            sockets.forEach(consumer);
+        }
+    }
+
     public static void main(String[] args) throws InterruptedException, IOException {
-        Path fromPath = Paths.get(Arrays.stream(args).findFirst().orElse("C:\\Users\\Shiroki\\Code\\MRSort\\data01.txt"));
+        if (args.length != 0 && args.length != 1 && args.length != 8) {
+            LOG.error("Don't know what to do!");
+            System.exit(1);
+        }
+
+        Path fromPath = Paths.get(Arrays.stream(args).skip(args.length - 1).findFirst().orElse("C:\\Users\\Shiroki\\Code\\MRSort\\data01.txt"));
         List<Path> files = (Files.isDirectory(fromPath)
                 ? StreamSupport.stream(Files.newDirectoryStream(fromPath).spliterator(), false)
                 .filter(p -> p.getFileName().toString().matches("data0\\d.txt"))
@@ -76,10 +171,9 @@ public class Pusher {
         Runtime runtime = Runtime.getRuntime();
         ThreadPoolExecutor executor = new ThreadPoolExecutor(6, 6,
                 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-        try (ZContext context = new ZContext(8)) {
-            context.setSndHWM(1024 * 1024);
-            org.zeromq.ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
-            socket.connect("tcp://localhost:5555");
+        try (Dispatcher disp = args.length != 8
+                ? Dispatcher.local()
+                : new Dispatcher(Arrays.stream(args).limit(8).map(String::trim))) {
             ByteBuffer buffer = ByteBuffer.allocate(512 * 1024 * 1024);
             for (Path file : files) {
                 try (SeekableByteChannel fc = Files.newByteChannel(file, READ)) {
@@ -130,7 +224,7 @@ public class Pusher {
                                         sendBuffer.putLong(data[i]);
                                     }
                                     sendBuffer.flip();
-                                    socket.sendByteBuffer(sendBuffer, 0);
+                                    disp.getSocketForCat(cat).sendByteBuffer(sendBuffer, 0);
                                 });
                             }
                         }
@@ -161,7 +255,7 @@ public class Pusher {
                         sendBuffer.putLong(data[count]);
                     }
                     sendBuffer.flip();
-                    socket.sendByteBuffer(sendBuffer, 0);
+                    disp.getSocketForCat(cat).sendByteBuffer(sendBuffer, 0);
                     sendBuffer.clear();
                 }
             }
@@ -177,9 +271,9 @@ public class Pusher {
             while (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
                 System.out.println("Waiting for executor to terminate");
             }
-            socket.send("", 0);
+
+            disp.foreach(socket -> socket.send("", 0));
             LOG.info("All done.");
-            socket.close();
         }
     }
 }
