@@ -105,10 +105,67 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
+    public static PersistedFile sortMergeBuffered(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
+        int newLevel = Integer.max(apf.level, bpf.level) + 1;
+        Path target = targetDir.resolve(String.format("%c%c_%d_%d.txt", category, second, newLevel, counter.getAndIncrement()));
+        LOG.info("MERGING {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+        try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
+             FileChannel channelA = FileChannel.open(apf.path, READ);
+             FileChannel channelB = FileChannel.open(bpf.path, READ)) {
+            ByteBuffer bufferA = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelA.size()));
+            ByteBuffer bufferB = ByteBuffer.allocateDirect((int) Long.min(Integer.MAX_VALUE, channelB.size()));
+
+            ByteBuffer outBuffer = ByteBuffer.allocateDirect((int) (channelA.size() + channelB.size()));
+
+            boolean statusA = channelA.read(bufferA) != -1;
+            boolean statusB = channelB.read(bufferB) != -1;
+            bufferA.flip();
+            bufferB.flip();
+
+            while (statusA && statusB) {
+                while (bufferA.hasRemaining() && bufferB.hasRemaining()) {
+                    if (!outBuffer.hasRemaining()) {
+                        outBuffer.flip();
+                        outChannel.write(outBuffer);
+                        outBuffer.clear();
+                    }
+                    outBuffer.putLong(bufferA.getLong(bufferA.position()) < bufferB.getLong(bufferB.position())
+                            ? bufferA.getLong() : bufferB.getLong());
+
+                }
+                if (!bufferA.hasRemaining()) {
+                    bufferA.clear();
+                    statusA = channelA.read(bufferA) != -1;
+                    bufferA.flip();
+                }
+                if (!bufferB.hasRemaining()) {
+                    bufferB.clear();
+                    statusB = channelB.read(bufferB) != -1;
+                    bufferB.flip();
+                }
+            }
+
+            outChannel.write(outBuffer);
+            outChannel.write(bufferA);
+            outChannel.write(bufferB);
+
+            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
+        } catch (IOException e) {
+            LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
+        }
+
+        try {
+            Files.delete(apf.path);
+            Files.delete(bpf.path);
+        } catch (IOException e) {
+            LOG.warn("Failed to delete {} and {}: {}", apf.path.getFileName(), bpf.path.getFileName(), e);
+        }
+        return new PersistedFile(target, newLevel);
+    }
+
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
-        if (apf.path.toFile().length() <= Integer.MAX_VALUE && bpf.path.toFile().length() <= Integer.MAX_VALUE) {
-            // use MappedByteBuffer
-            return sortMergeMapped(category, second, apf, bpf, counter, targetDir);
+        if (apf.path.toFile().length() + bpf.path.toFile().length() <= Integer.MAX_VALUE) {
+            return sortMergeBuffered(category, second, apf, bpf, counter, targetDir);
         }
 
         LOG.warn("Using non-MappedByteBuffer for {} and {}", apf.path.getFileName(), bpf.path.getFileName());
@@ -174,8 +231,8 @@ public class PersistedFile {
     public void decompress(ByteChannel targetChannel, byte category, byte second) throws IOException {
         try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
             int ioBufferSize = 1024 * 1024 * 32;
-            ByteBuffer readBuffer = ByteBuffer.allocate(ioBufferSize);
-            ByteBuffer writeBuffer = ByteBuffer.allocate(ioBufferSize * 2);
+            ByteBuffer readBuffer = ByteBuffer.allocateDirect(ioBufferSize);
+            ByteBuffer writeBuffer = ByteBuffer.allocateDirect(ioBufferSize * 2);
 
             while (inc.read(readBuffer) != -1) {
                 readBuffer.flip();
