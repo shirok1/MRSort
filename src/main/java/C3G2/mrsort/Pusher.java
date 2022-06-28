@@ -247,8 +247,10 @@ public class Pusher {
                 for (int j = 0; j < 26; j++) {
                     PushChunk chunk = chunks[i][j];
                     int size = chunk.getSize();
+                    if (size == 0) continue;
+                    assert size != CAP;
                     long[] data = chunk.getData();
-                    byte cat = (byte) (i + 'a');
+                    byte cat = (byte) (i + 'A');
                     byte second = (byte) (j + 'a');
                     Arrays.sort(data, 0, size);
                     sendBuffer.put(cat);
@@ -256,6 +258,7 @@ public class Pusher {
                     for (int count = 0; count < size; count++) {
                         sendBuffer.putLong(data[count]);
                     }
+                    sendBuffer.putInt(BUF_SIZE - 4, size);
                     sendBuffer.flip();
                     ZMQ.Socket soc = disp.getSocketForCat(cat);
                     LOG.info("Sending rest of {}{} to {}", (char) cat, (char) second, soc.getLastEndpoint());

@@ -122,8 +122,11 @@ public class Sink {
                 byte cat = buffer.get(0);
                 byte sec = buffer.get(1);
 
-                if (cat < parameter.start || cat > parameter.end) {
-                    LOG.warn("Received invalid cat: {}", (char) cat);
+                if (cat >= parameter.start - 'a' + 'A' && cat <= parameter.end - 'a' + 'A') {
+                    cat = (byte) (cat - 'a' + 'A');
+                    buffer.limit(buffer.getInt(Pusher.BUF_SIZE - 4));
+                } else if (cat < parameter.start || cat > parameter.end) {
+                    LOG.warn("Received invalid head: {}{}", (char) cat, (char) sec);
                     buffer.clear();
                     continue;
                 }
@@ -131,8 +134,9 @@ public class Sink {
                 CatCombo catCombo = sinks[cat - parameter.start];
                 CatCombo.SecondCombo secondCombo = catCombo.secondCombos[sec - 'a'];
                 PersistedFile persisted = PersistedFile.fromInput(buffer, secondCombo.counter, parameter.cache);
+                byte finalCat = cat;
                 executor.execute(() ->
-                        fileCreated(cat, sec, secondCombo.queue, secondCombo.counter, executor, parameter.cache)
+                        fileCreated(finalCat, sec, secondCombo.queue, secondCombo.counter, executor, parameter.cache)
                                 .accept(persisted));
                 LOG.info("Created file {}, executor {} waiting, {} running.",
                         persisted.getPath().getFileName(), executor.getQueue().size(), executor.getActiveCount());
