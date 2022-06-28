@@ -166,7 +166,10 @@ public class Sink {
                 LOG.info("String started with {} merged, now decompressing.", (char) cat);
                 Path target = parameter.result.resolve("result" + (char) cat + ".txt");
                 try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
-                    for (FileTuple tpl : result) tpl.file.decompress(outc, cat, tpl.second);
+                    int ioBufferSize = 1024 * 1024 * 32;
+                    ByteBuffer readBuffer = ByteBuffer.allocateDirect(ioBufferSize);
+                    ByteBuffer writeBuffer = ByteBuffer.allocateDirect(ioBufferSize * 2);
+                    for (FileTuple tpl : result) tpl.file.decompress(outc, cat, tpl.second, readBuffer, writeBuffer);
                     LOG.info("Decompressed to {}.", target.getFileName());
                 } catch (IOException e) {
                     LOG.error("Failed to decompress {}: {}", target.getFileName(), e);

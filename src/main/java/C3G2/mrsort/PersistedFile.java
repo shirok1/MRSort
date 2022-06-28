@@ -229,12 +229,8 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
-    public void decompress(ByteChannel targetChannel, byte category, byte second) throws IOException {
+    public void decompress(ByteChannel targetChannel, byte category, byte second, ByteBuffer readBuffer, ByteBuffer writeBuffer) throws IOException {
         try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
-            int ioBufferSize = 1024 * 1024 * 32;
-            ByteBuffer readBuffer = ByteBuffer.allocateDirect(ioBufferSize);
-            ByteBuffer writeBuffer = ByteBuffer.allocateDirect(ioBufferSize * 2);
-
             while (inc.read(readBuffer) != -1) {
                 readBuffer.flip();
                 while (readBuffer.hasRemaining()) {
