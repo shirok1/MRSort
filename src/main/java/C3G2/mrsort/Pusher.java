@@ -73,7 +73,8 @@ public class Pusher {
                 chunks[i][j] = new PushChunk(CAP);
             }
         }
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(7, 7,
+        Runtime runtime = Runtime.getRuntime();
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(6, 6,
                 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
         try (ZContext context = new ZContext(8)) {
             context.setSndHWM(1024 * 1024);
@@ -103,6 +104,9 @@ public class Pusher {
                                     speed, remain / 60, remain % 60));
                             lastTime = now;
                             lastPosition = filePosition;
+                            LOG.info(String.format("[Memory] Used: %,dMb Free: %,dMb Total: %,dMb",
+                                    (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024),
+                                    runtime.freeMemory() / (1024 * 1024), runtime.totalMemory() / (1024 * 1024)));
                         }
 
                         for (int offset = 0; offset < read; offset += 16) {
