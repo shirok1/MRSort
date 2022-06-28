@@ -104,7 +104,7 @@ public class Sink {
                     0L, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>());
 
-            ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUFSIZE);
+            ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUF_SIZE);
 
             while (!Thread.currentThread().isInterrupted()) {
                 int size = socket.recvByteBuffer(buffer, 0);

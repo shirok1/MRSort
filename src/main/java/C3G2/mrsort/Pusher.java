@@ -27,7 +27,7 @@ public class Pusher {
     private final static Logger LOG = LogManager.getLogger(Pusher.class);
 
     public static final int CAP = 1024 * 1024;
-    public static final int BUFSIZE = 2 + 8 * CAP;
+    public static final int BUF_SIZE = 2 + 8 * CAP;
 
     static class PushChunk {
         public int getSize() {
@@ -119,7 +119,7 @@ public class Pusher {
                                 long[] data = chunk.getAndReset(CAP);
                                 Thread.sleep(2);
                                 executor.execute(() -> {
-                                    ByteBuffer sendBuffer = ByteBuffer.allocate(BUFSIZE);
+                                    ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
                                     Arrays.sort(data);
                                     sendBuffer.put(cat);
                                     sendBuffer.put(second);
@@ -150,7 +150,7 @@ public class Pusher {
                     long[] data = chunk.getData();
                     byte cat = (byte) (i + 'a');
                     byte second = (byte) (j + 'a');
-                    ByteBuffer sendBuffer = ByteBuffer.allocate(BUFSIZE);
+                    ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
                     Arrays.sort(data, 0, size);
                     sendBuffer.put(cat);
                     sendBuffer.put(second);
