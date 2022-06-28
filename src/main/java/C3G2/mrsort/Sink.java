@@ -89,6 +89,7 @@ public class Sink {
         }
 
         try (ZContext context = new ZContext()) {
+            context.setRcvHWM(1024 * 1024);
             CatCombo[] sinks = new CatCombo[parameter.end - parameter.start + 1];
             for (char i = parameter.start; i <= parameter.end; i++) {
                 LOG.debug("Creating sink for cat {}", i);
@@ -101,8 +102,7 @@ public class Sink {
             LOG.info("Ready for PUSH! Port: {}", parameter.port);
 
             ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8,
-                    0L, TimeUnit.MILLISECONDS,
-                    new LinkedBlockingQueue<>());
+                    0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
             ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUF_SIZE);
 

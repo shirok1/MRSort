@@ -73,10 +73,10 @@ public class Pusher {
                 chunks[i][j] = new PushChunk(CAP);
             }
         }
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(8, 8,
-                0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>());
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(7, 7,
+                0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
         try (ZContext context = new ZContext(8)) {
+            context.setSndHWM(1024 * 1024);
             org.zeromq.ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
             socket.connect("tcp://localhost:5555");
             ByteBuffer buffer = ByteBuffer.allocate(512 * 1024 * 1024);
@@ -117,7 +117,6 @@ public class Pusher {
                             if (chunk.getSize() == CAP) {
                                 int size = chunk.getSize();
                                 long[] data = chunk.getAndReset(CAP);
-                                Thread.sleep(2);
                                 executor.execute(() -> {
                                     ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
                                     Arrays.sort(data);
@@ -136,7 +135,7 @@ public class Pusher {
                     long timeElapsed = System.currentTimeMillis() - startTime;
                     LOG.info(String.format("File: %s(%,dMb) finished. Time: %d:%02d Avg Speed: %,dKb/s",
                             fileName, fileSize / (1024 * 1024),
-                            timeElapsed / 60, timeElapsed % 60, fileSize / timeElapsed / 1024));
+                            timeElapsed / 1024 / 60, timeElapsed / 1024 % 60, fileSize / timeElapsed));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
