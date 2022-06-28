@@ -34,6 +34,10 @@ public class PersistedFile {
         return path;
     }
 
+    public String getFileName(){
+        return path.getFileName().toString();
+    }
+
     public static PersistedFile fromInput(ByteBuffer buffer, AtomicLong counter, Path targetDir) {
         byte category = buffer.get();
         byte second = buffer.get();

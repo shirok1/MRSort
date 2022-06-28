@@ -181,25 +181,26 @@ public class Sink {
     private static Consumer<PersistedFile> fileCreated(byte cat, byte sec, Set<PersistedFile> q, AtomicLong counter, Executor ex, Path cacheDir) {
         return file -> {
             synchronized (q) {
-                Optional<PersistedFile> best = q.stream().filter(b -> b.getLevel() == file.getLevel()).findFirst();
+                Optional<PersistedFile> best = q.stream().filter(sameLevel(file)).findFirst();
                 if (!best.isPresent())
                     best = q.stream().filter(levelInRange(file)).findFirst();
                 if (!best.isPresent()) {
-                    LOG.info("No best match, adding {} to [{}]",
-                            file.getPath().getFileName().toString(),
-                            q.stream().map(f -> f.getPath().getFileName().toString()).collect(Collectors.joining(", ")));
+                    LOG.info("No best match, adding {} to [{}]", file.getFileName(),
+                            q.stream().map(PersistedFile::getFileName).collect(Collectors.joining(", ")));
                     q.add(file);
                 } else {
                     PersistedFile b = best.get();
-                    LOG.info("Best match for {} found: {}",
-                            file.getPath().getFileName().toString(),
-                            b.getPath().getFileName().toString());
+                    LOG.info("Best match for {} found: {}", file.getFileName(), b.getFileName());
                     q.remove(b);
                     CompletableFuture.supplyAsync(() -> PersistedFile.sortMerge(cat, sec, file, b, counter, cacheDir), ex)
                             .thenAcceptAsync(fileCreated(cat, sec, q, counter, ex, cacheDir));
                 }
             }
         };
+    }
+
+    private static Predicate<PersistedFile> sameLevel(PersistedFile file) {
+        return b -> b.getLevel() == file.getLevel();
     }
 
     private static Predicate<PersistedFile> levelInRange(PersistedFile file) {
