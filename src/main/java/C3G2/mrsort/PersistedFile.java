@@ -196,10 +196,11 @@ public class PersistedFile {
             long lenSum = apf.path.toFile().length() + bpf.path.toFile().length();
             if (lenSum > 128 * 1024 * 1024 && lenSum < Integer.MAX_VALUE) {
                 sortMergeMapped(apf, bpf, target);
+                LOG.info("MERGED {} and {} into {}. (Mapped)", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
             } else {
                 sortMergeBuffered(apf, bpf, target);
+                LOG.info("MERGED {} and {} into {}. (Buffered)", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
             }
-            LOG.info("MERGED {} and {} into {}.", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName());
         } catch (IOException e) {
             LOG.error("Failed to merge {} and {} into {} :{}", apf.path.getFileName(), bpf.path.getFileName(), target.getFileName(), e);
         }
