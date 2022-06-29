@@ -95,7 +95,9 @@ public class Sink {
         }
 
         try (ZContext context = new ZContext()) {
+            // raise High Watermark to prevent overflow (maybe)
             context.setRcvHWM(1024 * 1024);
+
             CatCombo[] sinks = new CatCombo[parameter.end - parameter.start + 1];
             for (char i = parameter.start; i <= parameter.end; i++) {
                 LOG.debug("Creating sink for cat {}", i);
@@ -107,9 +109,11 @@ public class Sink {
 
             LOG.info("Ready for PUSH! Port: {}", parameter.port);
 
+            // for file merge only
             ThreadPoolExecutor executor = new ThreadPoolExecutor(4, 4,
                     0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
+            // for socket recv
             ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUF_SIZE);
 
             while (!Thread.currentThread().isInterrupted()) {
@@ -123,6 +127,7 @@ public class Sink {
                 byte sec = buffer.get(1);
 
                 if (cat >= parameter.start - 'a' + 'A' && cat <= parameter.end - 'a' + 'A') {
+                    // is not a full pack
                     cat = (byte) (cat + 'a' - 'A');
                     buffer.limit(buffer.getInt(Pusher.BUF_SIZE - 4));
                 } else if (cat < parameter.start || cat > parameter.end) {
@@ -147,7 +152,7 @@ public class Sink {
 
             Thread.sleep(1000);
 
-            LOG.info("Waiting for thread pool to empty...");
+            LOG.info("Waiting for merge to finish...");
             while (executor.getQueue().size() != 0 && executor.getActiveCount() != 0) {
                 LOG.info("Still waiting...({} waiting, {} running)",
                         executor.getQueue().size(), executor.getActiveCount());
@@ -164,31 +169,35 @@ public class Sink {
                 LOG.info("Result directory not existing, creating.");
                 Files.createDirectory(parameter.result);
             }
-            for (CatCombo catCombo : sinks) {
-                byte cat = catCombo.category;
-                class FileTuple {
-                    public final PersistedFile file;
-                    public final byte second;
 
-                    public FileTuple(PersistedFile file, byte second) {
-                        this.file = file;
-                        this.second = second;
+            {
+                int ioBufferSize = 1024 * 1024 * 32;
+                ByteBuffer readBuffer = ByteBuffer.allocateDirect(ioBufferSize);
+                ByteBuffer writeBuffer = ByteBuffer.allocateDirect(ioBufferSize * 2);
+                for (CatCombo catCombo : sinks) {
+                    byte cat = catCombo.category;
+                    class FileTuple {
+                        public final PersistedFile file;
+                        public final byte second;
+
+                        public FileTuple(PersistedFile file, byte second) {
+                            this.file = file;
+                            this.second = second;
+                        }
                     }
-                }
-                List<FileTuple> result = Arrays.stream(catCombo.secondCombos).map(c -> c.queue.parallelStream()
-                                .reduce((a, b) -> PersistedFile.sortMerge
-                                        (cat, c.second, a, b, c.counter, parameter.cache)).map(f -> new FileTuple(f, c.second)))
-                        .filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
-                LOG.info("String started with {} merged, now decompressing.", (char) cat);
-                Path target = parameter.result.resolve("result" + (char) cat + ".txt");
-                try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
-                    int ioBufferSize = 1024 * 1024 * 32;
-                    ByteBuffer readBuffer = ByteBuffer.allocateDirect(ioBufferSize);
-                    ByteBuffer writeBuffer = ByteBuffer.allocateDirect(ioBufferSize * 2);
-                    for (FileTuple tpl : result) tpl.file.decompress(outc, cat, tpl.second, readBuffer, writeBuffer);
-                    LOG.info("Decompressed to {}.", target.getFileName());
-                } catch (IOException e) {
-                    LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
+                    List<FileTuple> result = Arrays.stream(catCombo.secondCombos).map(c -> c.queue.parallelStream()
+                                    .reduce((a, b) -> PersistedFile.sortMerge
+                                            (cat, c.second, a, b, c.counter, parameter.cache)).map(f -> new FileTuple(f, c.second)))
+                            .filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
+                    LOG.info("String started with {} merged, now decompressing.", (char) cat);
+                    Path target = parameter.result.resolve("result" + (char) cat + ".txt");
+                    try (SeekableByteChannel outc = Files.newByteChannel(target, WRITE, CREATE, TRUNCATE_EXISTING)) {
+                        for (FileTuple tpl : result)
+                            tpl.file.decompress(outc, cat, tpl.second, readBuffer, writeBuffer);
+                        LOG.info("Decompressed to {}.", target.getFileName());
+                    } catch (IOException e) {
+                        LOG.error("Failed to decompress {}: {}", target.getFileName(), e);
+                    }
                 }
             }
             LOG.info("Merge finished.");
@@ -197,6 +206,18 @@ public class Sink {
         }
     }
 
+    /**
+     * File created event.
+     * Check the set to see if there is another file with similar level, and merge them or add the new file to the queue.
+     * <p>Priority: same level, file with level - 1, file with level + 1.<p>
+     * @param cat      category
+     * @param sec      second char
+     * @param q        {@link Set} (actually a thread safe priority queue) to add and get {@link PersistedFile}
+     * @param counter  pass through to {@link PersistedFile#sortMerge(byte, byte, PersistedFile, PersistedFile, AtomicLong, Path) PersistedFile.sortMerge}
+     * @param ex       merge task executor
+     * @param cacheDir pass through to ...
+     * @return a consumer
+     */
     private static Consumer<PersistedFile> fileCreated(byte cat, byte sec, Set<PersistedFile> q, AtomicLong counter, Executor ex, Path cacheDir) {
         return file -> {
             synchronized (q) {

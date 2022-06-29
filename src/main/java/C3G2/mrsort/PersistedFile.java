@@ -25,7 +25,7 @@ public class PersistedFile {
     private final Path path;
     private final int level;
 
-    public PersistedFile(Path path, int level) {
+    private PersistedFile(Path path, int level) {
         this.path = path;
         this.level = level;
     }
@@ -42,6 +42,14 @@ public class PersistedFile {
         return path.getFileName().toString();
     }
 
+    /**
+     * "Persist", write the long[] part of buffer to file.
+     *
+     * @param buffer    input buffer, with two byte of head
+     * @param counter   self-increasing counter, used to name new file
+     * @param targetDir target directory
+     * @return a {@link PersistedFile} representing the written file
+     */
     public static PersistedFile fromInput(ByteBuffer buffer, AtomicLong counter, Path targetDir) {
         byte category = buffer.get();
         byte second = buffer.get();
@@ -57,7 +65,15 @@ public class PersistedFile {
         return new PersistedFile(target, 0);
     }
 
-
+    /**
+     * Using MappedByteBuffer by {@link FileChannel#map(FileChannel.MapMode, long, long) FileChannel.map} to merge.
+     *
+     * @param apf    file A
+     * @param bpf    file B
+     * @param target target Path
+     * @throws IOException failed to open {@link FileChannel}
+     * @see #sortMerge(byte, byte, PersistedFile, PersistedFile, AtomicLong, Path)
+     */
     private static void sortMergeMapped(PersistedFile apf, PersistedFile bpf, Path target) throws IOException {
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
@@ -79,20 +95,22 @@ public class PersistedFile {
             outBuffer.put(bufferB);
 
             outBuffer.force();
-//            Cleaner cleaner = ((DirectBuffer) bufferA).cleaner();
-//            if (cleaner != null) {
-//                cleaner.clean();
-//            }
-//            cleaner = ((DirectBuffer) bufferB).cleaner();
-//            if (cleaner != null) {
-//                cleaner.clean();
-//            }
+
             closeDirectBuffer(bufferA);
             closeDirectBuffer(bufferB);
             closeDirectBuffer(outBuffer);
         }
     }
 
+    /**
+     * Using manual allocate ByteBuffer to merge.
+     *
+     * @param apf    file A
+     * @param bpf    file B
+     * @param target target Path
+     * @throws IOException failed to open {@link FileChannel}
+     * @see #sortMerge(byte, byte, PersistedFile, PersistedFile, AtomicLong, Path)
+     */
     private static void sortMergeBuffered(PersistedFile apf, PersistedFile bpf, Path target) throws IOException {
         try (FileChannel outChannel = FileChannel.open(target, READ, WRITE, CREATE, TRUNCATE_EXISTING);
              FileChannel channelA = FileChannel.open(apf.path, READ);
@@ -137,7 +155,15 @@ public class PersistedFile {
         }
     }
 
+
+    /**
+     * Close DirectBuffer with reflection
+     *
+     * @param buffer DirectBuffer to be clean
+     */
     private static void closeDirectBuffer(Buffer buffer) {
+//        Cleaner cleaner = ((DirectBuffer) bufferA).cleaner();
+//        if (cleaner != null) cleaner.clean();
         try {
             Method cleanerMethod = buffer.getClass().getMethod("cleaner");
             cleanerMethod.setAccessible(true);
@@ -150,6 +176,18 @@ public class PersistedFile {
         }
     }
 
+    /**
+     * Merge two sorted files into a new file, and delete two old file.
+     * (Will dispatch to using channel with ByteBuffer or MappedByteBuffer)
+     *
+     * @param category  category of both file
+     * @param second    "second char" of both file
+     * @param apf       file A
+     * @param bpf       file B
+     * @param counter   self-increasing counter, used to name new file
+     * @param targetDir target directory
+     * @return new {@link PersistedFile} representing merged file
+     */
     public static PersistedFile sortMerge(byte category, byte second, PersistedFile apf, PersistedFile bpf, AtomicLong counter, Path targetDir) {
         int newLevel = Integer.max(apf.level, bpf.level) + 1;
         Path target = targetDir.resolve(String.valueOf((char) category) + (char) second + "_" + newLevel + "_" + counter.getAndIncrement() + ".txt");
@@ -175,6 +213,14 @@ public class PersistedFile {
         return new PersistedFile(target, newLevel);
     }
 
+    /**
+     * @param targetChannel channel to write to
+     * @param category      category of strings to write
+     * @param second        second char of strings to write
+     * @param readBuffer    read buffer, allocated outside, will be cleared
+     * @param writeBuffer   write buffer, allocated outside, will be cleared
+     * @throws IOException failed to open read channel
+     */
     public void decompress(ByteChannel targetChannel, byte category, byte second, ByteBuffer readBuffer, ByteBuffer writeBuffer) throws IOException {
         try (SeekableByteChannel inc = Files.newByteChannel(path, READ)) {
             while (inc.read(readBuffer) != -1) {

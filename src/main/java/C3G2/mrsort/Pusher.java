@@ -68,6 +68,11 @@ public class Pusher {
 
         private final boolean isLocal;
 
+        /**
+         * Connect to Sinks.
+         *
+         * @param ips addresses of Sinks to connect
+         */
         Dispatcher(Stream<String> ips) {
             context = new ZContext(8);
             context.setSndHWM(1024 * 1024);
@@ -89,6 +94,10 @@ public class Pusher {
             }
         }
 
+        /**
+         * @param cat category of string
+         * @return socket for the cat (always return localhost in local mode)
+         */
         public ZMQ.Socket getSocketForCat(byte cat) {
             if (isLocal) {
                 return sockets.get(0);
@@ -140,10 +149,19 @@ public class Pusher {
             context.close();
         }
 
+        /**
+         * Connect to local Sink.
+         *
+         * @return a dispatcher connecting to tcp://localhost:5555
+         */
         public static Dispatcher local() {
             return new Dispatcher(Stream.of("localhost"));
         }
 
+        /**
+         * @param consumer a function to run over sockets
+         * @see Iterable#forEach(Consumer)
+         */
         public void foreach(Consumer<ZMQ.Socket> consumer) {
             sockets.forEach(consumer);
         }
@@ -169,8 +187,11 @@ public class Pusher {
             }
         }
         Runtime runtime = Runtime.getRuntime();
+
+        // thread pool for sort task
         ThreadPoolExecutor executor = new ThreadPoolExecutor(6, 6,
                 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+
         try (Dispatcher disp = args.length != 9
                 ? Dispatcher.local()
                 : new Dispatcher(Arrays.stream(args).limit(8).map(String::trim))) {
@@ -213,6 +234,7 @@ public class Pusher {
                             PushChunk chunk = chunks[cat - 'a'][second - 'a'];
                             chunk.add(rest);
                             if (chunk.getSize() == CAP) {
+                                // swap the current long[], start "sort and send" task
                                 int size = chunk.getSize();
                                 long[] data = chunk.getAndReset(CAP);
                                 executor.execute(() -> {
@@ -243,8 +265,8 @@ public class Pusher {
             }
 
             ByteBuffer sendBuffer = ByteBuffer.allocate(BUF_SIZE);
-            for (int i = 0; i < 26; i++) {
-                for (int j = 0; j < 26; j++) {
+            for (int j = 0; j < 26; j++) {
+                for (int i = 0; i < 26; i++) {
                     PushChunk chunk = chunks[i][j];
                     int size = chunk.getSize();
                     if (size == 0) continue;
@@ -258,6 +280,7 @@ public class Pusher {
                     for (int count = 0; count < size; count++) {
                         sendBuffer.putLong(data[count]);
                     }
+                    // extend the buffer to full size and set last 4 byte to real size
                     sendBuffer.putInt(BUF_SIZE - 4, sendBuffer.position());
                     sendBuffer.position(BUF_SIZE);
                     sendBuffer.flip();
@@ -265,7 +288,7 @@ public class Pusher {
                     LOG.info("Sending rest of {}{} to {}", (char) cat, (char) second, soc.getLastEndpoint());
                     soc.sendByteBuffer(sendBuffer, 0);
                     sendBuffer.clear();
-                    Thread.sleep(5);
+                    Thread.sleep(150);
                 }
             }
 
