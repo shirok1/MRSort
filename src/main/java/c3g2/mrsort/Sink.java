@@ -116,11 +116,20 @@ public class Sink {
             // for socket recv
             ByteBuffer buffer = ByteBuffer.allocate(Pusher.BUF_SIZE);
 
+            int stopSignalCount = 8;
+
             while (!Thread.currentThread().isInterrupted()) {
                 int size = socket.recvByteBuffer(buffer, 0);
                 if (size < 1) {
-                    LOG.info("Received empty string!");
-                    break;
+                    stopSignalCount--;
+                    LOG.info("Received empty string! {} more to shutdown.", stopSignalCount);
+                    if (stopSignalCount != 0) {
+                        buffer.clear();
+                        continue;
+                    }else{
+                        LOG.info("Break!");
+                        break;
+                    }
                 }
                 buffer.flip();
                 byte cat = buffer.get(0);
