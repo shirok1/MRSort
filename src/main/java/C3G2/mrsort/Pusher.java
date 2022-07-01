@@ -29,7 +29,7 @@ public class Pusher {
     private final static Logger LOG = LogManager.getLogger(Pusher.class);
 
     // make the size of array smaller than 4Mb
-    public static final int CAP = 512 * 1024 - 1;
+    public static final int CAP = 512 * 1024 - 16;
     public static final int BUF_SIZE = 2 + 8 * CAP;
 
     static class PushChunk {
