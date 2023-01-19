@@ -189,7 +189,7 @@ public class Pusher {
         }
         Runtime runtime = Runtime.getRuntime();
 
-        // thread pool for sort task
+        // thread pool for sort tasks
         ThreadPoolExecutor executor = new ThreadPoolExecutor(6, 6,
                 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
